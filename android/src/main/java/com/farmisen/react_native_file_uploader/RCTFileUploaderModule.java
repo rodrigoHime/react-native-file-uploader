@@ -86,8 +86,7 @@ public class RCTFileUploaderModule extends ReactContextBaseJavaModule implements
             String fieldName = getStringParam(settings, FIELD_NAME_FIELD, "file");
 
             File file = new File(path);
-            //FileInputStream fileInputStream = new FileInputStream(file);
-            FileInputStream fileInputStream =  (FileInputStream)getReactApplicationContext().getContentResolver().openInputStream(Uri.parse(settings.getString(URI_FIELD)));
+            FileInputStream fileInputStream =  (FileInputStream)getReactApplicationContext().getContentResolver().openInputStream(Uri.parse("file://" + settings.getString(URI_FIELD)));
             int bytesRead, bytesAvailable, bufferSize;
             byte[] buffer;
             int maxBufferSize = MAX_BUFFER_SIZE;
