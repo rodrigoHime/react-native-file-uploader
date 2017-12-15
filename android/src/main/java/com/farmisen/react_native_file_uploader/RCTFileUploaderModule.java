@@ -57,15 +57,20 @@ public class RCTFileUploaderModule extends ReactContextBaseJavaModule implements
         else {
             callback.invoke("Can't handle " + uri, null);
         }
-        this.uploadFile(path, settings, callback);
+        try {
+            this.uploadFile(path, settings, callback);
+        } catch (IOException e) {
+           FLog.e("IOException", e.getMessage());
+        }
     }
 
-    private void uploadFile(String path, ReadableMap settings, Callback callback) {
+    private void uploadFile(String path, ReadableMap settings, Callback callback) throws IOException {
         HttpURLConnection connection = null;
         FileUploadCountingOutputStream outputStream = null;
         InputStream inputStream = null;
 
-        String boundary = "*****" + UUID.randomUUID().toString() + "*****";
+        String boundary = "-----" + UUID.randomUUID().toString() + "-----";
+        String contentType = getStringParam(settings, CONTENT_TYPE_FIELD, "application/octet-stream");
 
         try {
             URL url = new URL(settings.getString(UPLOAD_URL_FIELD));
@@ -78,26 +83,39 @@ public class RCTFileUploaderModule extends ReactContextBaseJavaModule implements
             String method = getStringParam(settings, METHOD_FIELD, "POST");
             connection.setRequestMethod(method);
             connection.setRequestProperty("Connection", "Keep-Alive");
-            connection.setRequestProperty("User-Agent", "React Native File Uploader Android HTTP Client");
-            connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+            connection.setRequestProperty("User-Agent", "VolinspireApp");
+            connection.setRequestProperty("Content-Type", contentType);
 
-            String contentType = getStringParam(settings, CONTENT_TYPE_FIELD, "application/octet-stream");
-            String fileName = getStringParam(settings, FILE_NAME_FIELD, this.filenameForContentType(contentType));
-            String fieldName = getStringParam(settings, FIELD_NAME_FIELD, "file");
+            ReadableMap headerParams = getMapParam(settings, "headers", Arguments.createMap());
+            ReadableMapKeySetIterator headerKeys = headerParams.keySetIterator();
+            while (headerKeys.hasNextKey()) {
+                String key = headerKeys.nextKey();
+                ReadableType type = headerParams.getType(key);
+                String value = null;
+                switch (type) {
+                    case String:
+                        value = headerParams.getString(key);
+                        break;
+                    case Number:
+                        value = Integer.toString(headerParams.getInt(key));
+                        break;
+                    default:
+                        callback.invoke(type.toString() + " type not supported.", null);
+                        break;
+                }
 
-            File file = new File(path);
-            FileInputStream fileInputStream =  (FileInputStream)getReactApplicationContext().getContentResolver().openInputStream(Uri.parse("file://" + settings.getString(URI_FIELD)));
+                connection.setRequestProperty(key, value);
+            }
+
+
+            File file = new File(Uri.parse(settings.getString(URI_FIELD)).getPath());
+            FileInputStream fileInputStream = (FileInputStream) getReactApplicationContext().getContentResolver().openInputStream(Uri.parse(settings.getString(URI_FIELD)));
             int bytesRead, bytesAvailable, bufferSize;
             byte[] buffer;
             int maxBufferSize = MAX_BUFFER_SIZE;
 
             outputStream = new FileUploadCountingOutputStream(new DataOutputStream(connection.getOutputStream()), file.length(), settings.getString(URI_FIELD), this);
-            outputStream.writeBytes(TWO_HYPHENS + boundary + LINE_END);
-            outputStream.writeBytes("Content-Disposition: form-data; name=\"" + fieldName + "\"; filename=\"" + fileName + "\"" + LINE_END);
-            outputStream.writeBytes("Content-Type: " + contentType + LINE_END);
-            outputStream.writeBytes("Content-Transfer-Encoding: binary" + LINE_END);
 
-            outputStream.writeBytes(LINE_END);
             bytesAvailable = fileInputStream.available();
             bufferSize = Math.min(bytesAvailable, maxBufferSize);
             buffer = new byte[bufferSize];
@@ -108,40 +126,13 @@ public class RCTFileUploaderModule extends ReactContextBaseJavaModule implements
                 bufferSize = Math.min(bytesAvailable, maxBufferSize);
                 bytesRead = fileInputStream.read(buffer, 0, bufferSize);
             }
-            outputStream.writeBytes(LINE_END);
 
-            ReadableMap params = getMapParam(settings, "data", Arguments.createMap());
-            ReadableMapKeySetIterator keys = params.keySetIterator();
-            while (keys.hasNextKey()) {
-                String key = keys.nextKey();
-                ReadableType type = params.getType(key);
-                String value = null;
-                switch (type) {
-                    case String:
-                        value = params.getString(key);
-                        break;
-                    case Number:
-                        value = Integer.toString(params.getInt(key));
-                        break;
-                    default:
-                        callback.invoke(type.toString() + " type not supported.", null);
-                        break;
-                }
-
-                outputStream.writeBytes(TWO_HYPHENS + boundary + LINE_END);
-                outputStream.writeBytes("Content-Disposition: form-data; name=\"" + key + "\"" + LINE_END);
-                outputStream.writeBytes("Content-Type: text/plain" + LINE_END);
-                outputStream.writeBytes(LINE_END + value + LINE_END);
-            }
-
-            outputStream.writeBytes(TWO_HYPHENS + boundary + TWO_HYPHENS + LINE_END);
-
+            outputStream.flush();
             inputStream = connection.getInputStream();
             String responseBody = this.streamToString(inputStream);
 
             fileInputStream.close();
             inputStream.close();
-            outputStream.flush();
             outputStream.close();
 
             WritableMap result = Arguments.createMap();
@@ -149,7 +140,13 @@ public class RCTFileUploaderModule extends ReactContextBaseJavaModule implements
             result.putInt("status", connection.getResponseCode());
             callback.invoke(null, result);
         } catch (Exception e) {
+            if (connection != null) {
+                FLog.e("Response", connection.getResponseMessage());
+            }
+            e.printStackTrace();
             callback.invoke(e.getLocalizedMessage(), null);
+        } finally {
+            connection.disconnect();
         }
     }
 
